@@ -3,6 +3,7 @@ Repositório para criação de Trabalhos da Disciplina de Redes de Computadores,
 
 # Parte I
 Camada de Aplicação
+
 *Implementação de Cliente e Servidor através de Sockets usando protocolo TCP na linguagem Python
 
 # Parte II
