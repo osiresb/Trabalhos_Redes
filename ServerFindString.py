@@ -27,14 +27,19 @@ key = sys.argv[1]
 
 while True:
 	cli, addr = s.accept()
-	#cli.setblocking(0) #?
-	req = b''
+
 	while True:
-		#select.select(rlist, wlist, xlist, timeout=None)
-		res_select = select.select([cli], [], [])
-		# print("resultado do select: %r" % (res_select, ))
-		req = cli.recv(1500)  #nao garante que vai receber tudo, usar um loop
+		req = b''
+		while not (b'\r\n\r\n' in req or b'\n\n' in req):
+			pedaco = cli.recv(1500)
+			if pedaco == b'':
+				break
+			req += pedaco
+		if req == b'':
+			break
 		msg = req.decode()
+		#print(msg)
+		#print('requisição tem %d bytes' % len(msg))
 		result = str(IsStringInText(key, msg))
 		print(result, flush=True)
 		resp = result.encode()
