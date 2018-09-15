@@ -1,4 +1,11 @@
-import socket, select, sys
+# Server that tries to find a string spread over text.
+# The server consider '\r\n\r\n' as end of text.
+#
+# Receives the string as an argument on start
+#     Start the server using:
+#         python ServerFindString.py arg1
+
+import socket, sys
 
 def IsStringInText(string, text):
 	stringIt = iter(string)

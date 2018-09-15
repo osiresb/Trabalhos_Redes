@@ -1,11 +1,10 @@
-#cliente TCP para camada de aplicacao usando socket
+# Client that sends a random message to the server
 
 import socket, string, random
 
-HOST='127.0.0.1'  #IP do Servidor
-PORT=8000            #PORT do servidor
+HOST='127.0.0.1'
+PORT=8000
 
-#criar conexao
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.connect((HOST, PORT))
 
@@ -15,9 +14,7 @@ n = int(input())
 while n != '\x18':
     msg = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(n))
     msg += "\r\n\r\n"
-    s.send(str(msg).encode()) # envia a msg digitada
+    s.send(str(msg).encode()) # sends the random message
     n = int(input())
 
-
-#encera conexao
 s.close()

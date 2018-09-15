@@ -1,11 +1,10 @@
-#cliente TCP para camada de aplicacao usando socket
+# Client that sends literal message to the server
 
 import socket
 
-HOST='127.0.0.1'  #IP do Servidor
-PORT=8000            #PORT do servidor
+HOST='127.0.0.1'
+PORT=8000
 
-#criar conexao
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.connect((HOST, PORT))
 
@@ -14,9 +13,7 @@ msg = input()
 
 while msg != '\x18':
     msg += "\r\n\r\n"
-    s.send(str(msg).encode()) # envia a msg digitada
+    s.send(str(msg).encode()) # sends the message
     msg = input()
 
-
-#encera conexao
 s.close()
