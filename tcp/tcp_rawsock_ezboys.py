@@ -28,6 +28,7 @@ class Conexao:
         self.seq_no = seq_no
         self.ack_no = ack_no
         self.send_queue = b"HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n\r\n" + 1000000 * b"hello pombo\n"
+        self.establ_con = False
 conexoes = {}
 
 
@@ -128,13 +129,14 @@ def raw_recv(fd):
         fd.sendto(fix_checksum(make_synack(dst_port, src_port, conexao.seq_no, conexao.ack_no),
                                src_addr, dst_addr),
                   (src_addr, src_port))
-
-        conexao.seq_no += 1
-
-        asyncio.get_event_loop().call_later(.1, send_next, fd, conexao)
     elif id_conexao in conexoes:
         conexao = conexoes[id_conexao]
-        conexao.ack_no += len(payload)
+        if not conexao.establ_con and (flags & FLAGS_ACK) == FLAGS_ACK \
+                and ack_no == conexao.seq_no + 1:
+            conexao.establ_con = True
+            asyncio.get_event_loop().call_later(.1, send_next, fd, conexao)
+        else:
+            conexao.ack_no += len(payload)
     else:
         print('%s:%d -> %s:%d (pacote associado a conexão desconhecida)' %
             (src_addr, src_port, dst_addr, dst_port))
