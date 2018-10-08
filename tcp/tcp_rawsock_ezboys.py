@@ -31,6 +31,7 @@ class Conexao:
         self.last_ack_sent = seq_no
         self.current_last_byte_sent = 0
         self.establ_con = False
+        self.finish_con = False
 conexoes = {}
 
 
@@ -56,6 +57,15 @@ def make_synack(src_port, dst_port, seq_no, ack_no):
                        ack_no, (5<<12)|FLAGS_ACK|FLAGS_SYN,
                        1024, 0, 0)
 
+def make_finack(src_port, dst_port, seq_no, ack_no):
+    return struct.pack('!HHIIHHHH', src_port, dst_port, seq_no,
+                       ack_no, (5<<12)|FLAGS_FIN|FLAGS_ACK,
+                       0, 0, 0)
+
+def make_ack(src_port, dst_port, seq_no, ack_no):
+    return struct.pack('!HHIIHHHH', src_port, dst_port, seq_no,
+                       ack_no, (5<<12)|FLAGS_ACK,
+                       0, 0, 0)
 
 def calc_checksum(segment):
     if len(segment) % 2 == 1:
@@ -80,11 +90,20 @@ def fix_checksum(segment, src_addr, dst_addr):
 
 
 def send_next(fd, conexao):
+    (dst_addr, dst_port, src_addr, src_port) = conexao.id_conexao
+
+    if conexao.send_queue == b"":
+        segment = struct.pack('!HHIIHHHH', src_port, dst_port, conexao.seq_no,
+                          conexao.ack_no, (5<<12)|FLAGS_FIN|FLAGS_ACK,
+                          0, 0, 0)
+        segment = fix_checksum(segment, src_addr, dst_addr)
+        fd.sendto(segment, (dst_addr, dst_port))
+        conexao.finish_con = True
+        return
+
     last_byte_send = conexao.current_last_byte_sent
     payload = conexao.send_queue[last_byte_send:last_byte_send + MSS]
     conexao.current_last_byte_sent += len(payload)
-
-    (dst_addr, dst_port, src_addr, src_port) = conexao.id_conexao
 
     segment = struct.pack('!HHIIHHHH', src_port, dst_port, conexao.seq_no,
                           conexao.ack_no, (5<<12)|FLAGS_ACK,
@@ -97,14 +116,7 @@ def send_next(fd, conexao):
     if not TESTAR_PERDA_ENVIO or random.random() < 0.95:
         fd.sendto(segment, (dst_addr, dst_port))
 
-    if conexao.send_queue == b"":
-        segment = struct.pack('!HHIIHHHH', src_port, dst_port, conexao.seq_no,
-                          conexao.ack_no, (5<<12)|FLAGS_FIN|FLAGS_ACK,
-                          0, 0, 0)
-        segment = fix_checksum(segment, src_addr, dst_addr)
-        fd.sendto(segment, (dst_addr, dst_port))
-    else:
-        asyncio.get_event_loop().call_later(.001, send_next, fd, conexao)
+    asyncio.get_event_loop().call_later(.001, send_next, fd, conexao)
 
 
 def raw_recv(fd):
@@ -134,12 +146,24 @@ def raw_recv(fd):
                   (src_addr, src_port))
     elif id_conexao in conexoes:
         conexao = conexoes[id_conexao]
-        if not conexao.establ_con and (flags & FLAGS_ACK) == FLAGS_ACK \
+        if (flags & FLAGS_FIN) == FLAGS_FIN and ack_no == conexao.seq_no + 1:
+            fd.sendto(fix_checksum(make_finack(dst_port, src_port, conexao.seq_no + 1, conexao.ack_no),
+                                   src_addr, dst_addr),
+                      (src_addr, src_port))
+        elif not conexao.establ_con and (flags & FLAGS_ACK) == FLAGS_ACK \
                 and ack_no == conexao.seq_no + 1:
             conexao.establ_con = True
+            conexao.seq_no += 1
             conexao.last_ack_sent += 1
             #asyncio.get_event_loop().call_later(.1, send_next, fd, conexao)
             send_next(fd, conexao)
+        elif conexao.finish_con and (flags & FLAGS_ACK) == FLAGS_ACK:
+            if ack_no == conexao.seq_no + 1:
+                conexao.seq_no += 1
+            #else:
+                #fd.sendto(fix_checksum(make_ack(dst_port, src_port, conexao.seq_no + 1, conexao.ack_no),
+                                       #src_addr, dst_addr),
+                          #(src_addr, src_port))
         else:
             if ack_no > conexao.last_ack_sent:
                 bytes_acked = ack_no - conexao.last_ack_sent
