@@ -89,18 +89,13 @@ def fix_checksum(segment, src_addr, dst_addr):
     return bytes(seg)
 
 
-def send_next(fd, conexao):
+def send_next(fd, conexao, bytes_to_send):
     (dst_addr, dst_port, src_addr, src_port) = conexao.id_conexao
 
-    if conexao.send_queue == b"":
-        segment = make_finack(src_port, dst_port, conexao.seq_no, conexao.ack_no)
-        segment = fix_checksum(segment, src_addr, dst_addr)
-        fd.sendto(segment, (dst_addr, dst_port))
-        conexao.finish_con = True
-        return
-
     last_byte_send = conexao.current_last_byte_sent
-    payload = conexao.send_queue[last_byte_send:last_byte_send + MSS]
+    payload = conexao.send_queue[last_byte_send:last_byte_send + bytes_to_send]
+    if len(payload) == 0:
+        return 0
     conexao.current_last_byte_sent += len(payload)
 
     segment = struct.pack('!HHIIHHHH', src_port, dst_port, conexao.seq_no,
@@ -114,8 +109,21 @@ def send_next(fd, conexao):
     if not TESTAR_PERDA_ENVIO or random.random() < 0.95:
         fd.sendto(segment, (dst_addr, dst_port))
 
-    asyncio.get_event_loop().call_later(.001, send_next, fd, conexao)
+    return len(payload)
 
+def send_batch(fd, conexao, window_size):
+    bytes_sent = conexao.current_last_byte_sent
+    num_last_bytes_sent = 1
+    while bytes_sent < window_size and num_last_bytes_sent != 0:
+        bytes_to_send = min(window_size - bytes_sent, MSS)
+        num_last_bytes_sent = send_next(fd, conexao, bytes_to_send)
+        bytes_sent += num_last_bytes_sent
+    if num_last_bytes_sent == 0 and not conexao.finish_con:
+        (dst_addr, dst_port, src_addr, src_port) = conexao.id_conexao
+        segment = make_finack(src_port, dst_port, conexao.seq_no, conexao.ack_no)
+        segment = fix_checksum(segment, src_addr, dst_addr)
+        fd.sendto(segment, (dst_addr, dst_port))
+        conexao.finish_con = True
 
 def raw_recv(fd):
     packet = fd.recv(12000)
@@ -144,6 +152,7 @@ def raw_recv(fd):
                   (src_addr, src_port))
     elif id_conexao in conexoes:
         conexao = conexoes[id_conexao]
+        conexao.ack_no += len(payload)
         if (flags & FLAGS_FIN) == FLAGS_FIN and ack_no == conexao.seq_no + 1:
             conexao.seq_no += 1
             conexao.ack_no += 1
@@ -156,21 +165,14 @@ def raw_recv(fd):
             conexao.seq_no += 1
             conexao.last_ack_sent += 1
             #asyncio.get_event_loop().call_later(.1, send_next, fd, conexao)
-            send_next(fd, conexao)
-        elif conexao.finish_con and (flags & FLAGS_ACK) == FLAGS_ACK:
-            if ack_no == conexao.seq_no + 1:
-                conexao.seq_no += 1
-            #else:
-                #fd.sendto(fix_checksum(make_ack(dst_port, src_port, conexao.seq_no + 1, conexao.ack_no),
-                                       #src_addr, dst_addr),
-                          #(src_addr, src_port))
+            send_batch(fd, conexao, window_size)
         else:
             if ack_no > conexao.last_ack_sent:
                 bytes_acked = ack_no - conexao.last_ack_sent
                 conexao.last_ack_sent = ack_no
-                conexao.current_last_byte_sent = 0
+                conexao.current_last_byte_sent -= bytes_acked
                 conexao.send_queue = conexao.send_queue[bytes_acked:]
-            conexao.ack_no += len(payload)
+                send_batch(fd, conexao, window_size)
     else:
         print('%s:%d -> %s:%d (pacote associado a conexão desconhecida)' %
             (src_addr, src_port, dst_addr, dst_port))
