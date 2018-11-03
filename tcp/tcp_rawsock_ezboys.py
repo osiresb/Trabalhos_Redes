@@ -19,7 +19,7 @@ FLAGS_ACK = 1<<4
 
 MSS = 1460
 
-TESTAR_PERDA_ENVIO = False
+TESTAR_PERDA_ENVIO = True
 
 
 class Conexao:
@@ -32,6 +32,7 @@ class Conexao:
         self.current_last_byte_sent = 0
         self.establ_con = False
         self.finish_con = False
+        self.callback_handle = None
 conexoes = {}
 
 
@@ -113,7 +114,7 @@ def send_next(fd, conexao, bytes_to_send):
 
 def send_batch(fd, conexao, window_size):
     bytes_sent = conexao.current_last_byte_sent
-    num_last_bytes_sent = 1
+    num_last_bytes_sent = None
     while bytes_sent < window_size and num_last_bytes_sent != 0:
         bytes_to_send = min(window_size - bytes_sent, MSS)
         num_last_bytes_sent = send_next(fd, conexao, bytes_to_send)
@@ -124,6 +125,11 @@ def send_batch(fd, conexao, window_size):
         segment = fix_checksum(segment, src_addr, dst_addr)
         fd.sendto(segment, (dst_addr, dst_port))
         conexao.finish_con = True
+
+def retransmit_packets(fd, conexao):
+    conexao.seq_no = (conexao.seq_no - conexao.current_last_byte_sent) & 0xffffffff
+    conexao.current_last_byte_sent = 0
+    send_batch(fd, conexao, conexao.cur_window_size)
 
 def raw_recv(fd):
     packet = fd.recv(12000)
@@ -153,6 +159,10 @@ def raw_recv(fd):
     elif id_conexao in conexoes:
         conexao = conexoes[id_conexao]
         conexao.ack_no += len(payload)
+        conexao.cur_window_size = window_size
+        if conexao.callback_handle:
+            conexao.callback_handle.cancel()
+        conexao.callback_handle = asyncio.get_event_loop().call_later(.1, retransmit_packets, fd, conexao)
         if (flags & FLAGS_FIN) == FLAGS_FIN and ack_no == conexao.seq_no + 1:
             conexao.seq_no += 1
             conexao.ack_no += 1
@@ -164,7 +174,6 @@ def raw_recv(fd):
             conexao.establ_con = True
             conexao.seq_no += 1
             conexao.last_ack_sent += 1
-            #asyncio.get_event_loop().call_later(.1, send_next, fd, conexao)
             send_batch(fd, conexao, window_size)
         else:
             if ack_no > conexao.last_ack_sent:
