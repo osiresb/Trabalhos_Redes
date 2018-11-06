@@ -11,6 +11,7 @@ import socket
 import struct
 import os
 import random
+import time
 
 FLAGS_FIN = 1<<0
 FLAGS_SYN = 1<<1
@@ -21,6 +22,7 @@ MSS = 1460
 
 TESTAR_PERDA_ENVIO = True
 
+from array import *
 
 class Conexao:
     def __init__(self, id_conexao, seq_no, ack_no):
@@ -33,6 +35,15 @@ class Conexao:
         self.establ_con = False
         self.finish_con = False
         self.callback_handle = None
+        self.time_send_index = 0
+        self.time_recv_index = 0
+        self.rtt_index = 0
+        self.rtt_index_limit = 10
+        self.alpha = 0.125
+        self.est_rtt = 0.1
+        self.time_send = array('d',[0,0,0,0,0,0,0,0,0,0])
+        self.time_recv = array('d',[0,0,0,0,0,0,0,0,0,0])
+        self.rtt = array('d',[0,0,0,0,0,0,0,0,0,0])
 conexoes = {}
 
 
@@ -117,6 +128,9 @@ def send_batch(fd, conexao, window_size):
     num_last_bytes_sent = None
     while bytes_sent < window_size and num_last_bytes_sent != 0:
         bytes_to_send = min(window_size - bytes_sent, MSS)
+
+        conexao.time_send[conexao.time_send_index] = time.time()
+        conexao.time_send_index = (conexao.time_send_index + 1) % (conexao.rtt_index_limit)	
         num_last_bytes_sent = send_next(fd, conexao, bytes_to_send)
         bytes_sent += num_last_bytes_sent
     if num_last_bytes_sent == 0 and not conexao.finish_con:
@@ -130,6 +144,13 @@ def retransmit_packets(fd, conexao):
     conexao.seq_no = (conexao.seq_no - conexao.current_last_byte_sent) & 0xffffffff
     conexao.current_last_byte_sent = 0
     send_batch(fd, conexao, conexao.cur_window_size)
+
+def rtt_div(conexao):
+    div = 0
+    for i in range (0,conexao.rtt_index_limit):
+        if conexao.rtt[i] != 0:
+            div += 1
+    return div
 
 def raw_recv(fd):
     packet = fd.recv(12000)
@@ -160,9 +181,18 @@ def raw_recv(fd):
         conexao = conexoes[id_conexao]
         conexao.ack_no += len(payload)
         conexao.cur_window_size = window_size
+
+        conexao.time_recv[conexao.time_recv_index] = time.time()
+        conexao.time_recv_index = (conexao.time_recv_index + 1) % (conexao.rtt_index_limit)	
+        if (conexao.time_recv[conexao.rtt_index] == 0) or (conexao.time_send[conexao.rtt_index] == 0):
+            conexao.rtt[conexao.rtt_index] = 0.1
+        else:
+            conexao.rtt[conexao.rtt_index] = conexao.time_recv[conexao.rtt_index] - conexao.time_send[conexao.rtt_index]
+        conexao.rtt_index = (conexao.rtt_index + 1) % (conexao.rtt_index_limit)
+        conexao.est_rtt=(1-conexao.alpha)*conexao.est_rtt+conexao.alpha*sum(conexao.rtt)/rtt_div(conexao)
         if conexao.callback_handle:
             conexao.callback_handle.cancel()
-        conexao.callback_handle = asyncio.get_event_loop().call_later(.1, retransmit_packets, fd, conexao)
+        conexao.callback_handle = asyncio.get_event_loop().call_later(conexao.est_rtt, retransmit_packets, fd, conexao)
         if (flags & FLAGS_FIN) == FLAGS_FIN and ack_no == conexao.seq_no + 1:
             conexao.seq_no += 1
             conexao.ack_no += 1
