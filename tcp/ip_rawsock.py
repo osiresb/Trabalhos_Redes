@@ -23,6 +23,7 @@ class Full_packet:
  def __init__(self, identification, ip):
     self.identification = identification
     self.ip_list = [ip]
+    self.callback_handle = None
 full_packet_list = {}
 
 def addr2str(addr):
@@ -59,6 +60,9 @@ def return_payload(ip_list):
         complete_payload = complete_payload + ip.payload
     return complete_payload
 
+def delete_packets(id_packet):
+    full_packet_list[id_packet] = None
+
 def raw_recv(recv_fd):
     packet = recv_fd.recv(12000)
     print('recebido pacote de %d bytes' % len(packet))
@@ -92,7 +96,10 @@ def raw_recv(recv_fd):
             print('OK')
             complete_payload = return_payload(full_packet.ip_list)
             print(complete_payload)
-
+    if full_packet.callback_handle:
+        full_packet.callback_handle.cancel()
+    full_packet.callback_handle = asyncio.get_event_loop().call_later(1, delete_packets, id_packet)
+    
     print(version)
     print(hlen)
     print(service)
