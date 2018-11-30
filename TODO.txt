@@ -1,0 +1,5 @@
+Fazer transmissao somente ate windowsize - OK!
+Fazer retransmissao simples - OK!
+Fazer retransmissao passados rtt secs sem receber ack
+Levar em consideracao o congestionamento da rede para enviar os pacotes
+
