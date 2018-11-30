@@ -1,7 +1,7 @@
 import socket
 import asyncio
 import struct
-
+from ip_rawsock import recv_ip_packet
 
 ETH_P_ALL = 0x0003
 ETH_P_IP  = 0x0800
@@ -71,7 +71,6 @@ def send_ping(fd):
 
     asyncio.get_event_loop().call_later(1, send_ping, fd)
 
-
 def raw_recv(fd):
     frame = fd.recv(12000)
     frame_mac_dst = frame[0:6]
@@ -80,6 +79,7 @@ def raw_recv(fd):
         if frame_ip_protocol == ETH_P_IP:
             print('recebido quadro de %d bytes' % len(frame))
             print(repr(frame))
+            recv_ip_packet(frame[14:])
 
 
 def calc_checksum(segment):
