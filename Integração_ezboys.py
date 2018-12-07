@@ -372,7 +372,7 @@ def send_ip(send_fd, msg, protocol):
     send_eth(fd, ip_header + msg, ETH_P_IP)
 
 #----------------------------------------
-#Meno Principal
+#Menu Principal
 if __name__ == '__main__':
     # Ver http://man7.org/linux/man-pages/man7/raw.7.html
     send_fd = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.IPPROTO_TCP)
