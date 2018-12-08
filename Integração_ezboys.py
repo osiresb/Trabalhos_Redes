@@ -1,7 +1,7 @@
 #Integração das Etapas do Trabalho de Redes
 #Etapa2: Camada de Transporte (Implementação do Protocolo TCP)
 #Etapa3: Implementação da Camada de Redes
-#Etapa4: Implementar Camada de Enlace
+#Etapa4: Implementação da Camada de Enlace
 
 #--------------------------------
 
@@ -214,10 +214,7 @@ def raw_recv(recv_fd):
         print('%s:%d -> %s:%d (pacote associado a conexão desconhecida)' %
             (src_addr, src_port, dst_addr, dst_port))
 
-#---------------------------------
-#Etapa3: Implementação da Camada de Redes
-#--------------------------------
-
+#
 class Ip:
  def __init__(self, version, hlen, service, tlen, identification, flags, foffset, ttl, protocol, checksum, source, destination, payload):
     self.version = version
@@ -233,7 +230,6 @@ class Ip:
     self.src = source
     self.dst = destination
     self.payload = payload
-
 
 class Full_packet:
  def __init__(self, identification, ip):
@@ -311,9 +307,8 @@ def calc_checksum(segment):
     checksum = ~checksum
     return checksum & 0xffff
 
-#---------------------------------------
-# Etapa 4
 
+#
 ETH_P_ALL = 0x0003
 # ETH_P_IP  = 0x0800
 
@@ -371,7 +366,6 @@ def send_ip(send_fd, msg, protocol):
     ip_pkt_id += 1
     send_eth(fd, ip_header + msg, ETH_P_IP)
 
-#----------------------------------------
 #Menu Principal
 if __name__ == '__main__':
     # Ver http://man7.org/linux/man-pages/man7/raw.7.html
