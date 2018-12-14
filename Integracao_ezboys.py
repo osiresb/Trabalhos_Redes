@@ -1,9 +1,16 @@
 #Integração das Etapas do Trabalho de Redes
 #Etapa2: Camada de Transporte (Implementação do Protocolo TCP)
 #Etapa3: Implementação da Camada de Redes
-#Etapa4: Implementação da Camada de Enlace
+#Etapa4: Implementar Camada de Enlace
 
-#--------------------------------
+#--------Etapa2------------------------
+
+#!/usr/bin/python3
+#
+# Antes de usar, execute o seguinte comando para evitar que o Linux feche
+# as conexões TCP abertas por este programa:
+#
+# sudo iptables -I OUTPUT -p tcp --tcp-flags RST RST -j DROP
 
 import asyncio
 import socket
@@ -16,6 +23,8 @@ FLAGS_FIN = 1<<0
 FLAGS_SYN = 1<<1
 FLAGS_RST = 1<<2
 FLAGS_ACK = 1<<4
+
+
 
 MSS = 1460
 
@@ -99,7 +108,7 @@ def fix_checksum(segment, src_addr, dst_addr):
     return bytes(seg)
 
 
-def send_next(send_fd, conexao, bytes_to_send):
+def send_next(fd, conexao, bytes_to_send):
     (dst_addr, dst_port, src_addr, src_port) = conexao.id_conexao
 
     last_byte_send = conexao.current_last_byte_sent
@@ -121,7 +130,7 @@ def send_next(send_fd, conexao, bytes_to_send):
 
     return len(payload)
 
-def send_batch(send_fd, conexao, window_size):
+def send_batch(fd, conexao, window_size):
     bytes_sent = conexao.current_last_byte_sent
     num_last_bytes_sent = None
     while bytes_sent < window_size and num_last_bytes_sent != 0:
@@ -135,10 +144,10 @@ def send_batch(send_fd, conexao, window_size):
         (dst_addr, dst_port, src_addr, src_port) = conexao.id_conexao
         segment = make_finack(src_port, dst_port, conexao.seq_no, conexao.ack_no)
         segment = fix_checksum(segment, src_addr, dst_addr)
-        send_fd.sendto(segment, (dst_addr, dst_port))
+        fd.sendto(segment, (dst_addr, dst_port))
         conexao.finish_con = True
 
-def retransmit_packets(send_fd, conexao):
+def retransmit_packets(fd, conexao):
     conexao.seq_no = (conexao.seq_no - conexao.current_last_byte_sent) & 0xffffffff
     conexao.current_last_byte_sent = 0
     send_batch(fd, conexao, conexao.cur_window_size)
@@ -150,8 +159,8 @@ def rtt_div(conexao):
             div += 1
     return div
 
-def raw_recv(recv_fd):
-    packet = recv_fd.recv(12000)
+def raw_recv_tcp(fd):
+    packet = fd.recv(12000)
     src_addr, dst_addr, segment = handle_ipv4_header(packet)
     src_port, dst_port, seq_no, ack_no, \
         flags, window_size, checksum, urg_ptr = \
@@ -172,7 +181,7 @@ def raw_recv(recv_fd):
                                                  seq_no=struct.unpack('I', os.urandom(4))[0],
                                                  ack_no=seq_no + 1)
 
-        recv_fd.sendto(fix_checksum(make_synack(dst_port, src_port, conexao.seq_no, conexao.ack_no),
+        fd.sendto(fix_checksum(make_synack(dst_port, src_port, conexao.seq_no, conexao.ack_no),
                                src_addr, dst_addr),
                   (src_addr, src_port))
     elif id_conexao in conexoes:
@@ -194,7 +203,7 @@ def raw_recv(recv_fd):
         if (flags & FLAGS_FIN) == FLAGS_FIN and ack_no == conexao.seq_no + 1:
             conexao.seq_no += 1
             conexao.ack_no += 1
-            recv_fd.sendto(fix_checksum(make_ack(dst_port, src_port, conexao.seq_no, conexao.ack_no),
+            fd.sendto(fix_checksum(make_ack(dst_port, src_port, conexao.seq_no, conexao.ack_no),
                                    src_addr, dst_addr),
                       (src_addr, src_port))
         elif not conexao.establ_con and (flags & FLAGS_ACK) == FLAGS_ACK \
@@ -202,19 +211,20 @@ def raw_recv(recv_fd):
             conexao.establ_con = True
             conexao.seq_no += 1
             conexao.last_ack_sent += 1
-            send_batch(recv_fd, conexao, window_size)
+            send_batch(fd, conexao, window_size)
         else:
             if ack_no > conexao.last_ack_sent:
                 bytes_acked = ack_no - conexao.last_ack_sent
                 conexao.last_ack_sent = ack_no
                 conexao.current_last_byte_sent -= bytes_acked
                 conexao.send_queue = conexao.send_queue[bytes_acked:]
-                send_batch(recv_fd, conexao, window_size)
+                send_batch(fd, conexao, window_size)
     else:
         print('%s:%d -> %s:%d (pacote associado a conexão desconhecida)' %
             (src_addr, src_port, dst_addr, dst_port))
+   
+#--------------Etapa3------------------
 
-#
 class Ip:
  def __init__(self, version, hlen, service, tlen, identification, flags, foffset, ttl, protocol, checksum, source, destination, payload):
     self.version = version
@@ -237,24 +247,20 @@ class Full_packet:
     self.ip_list = [ip]
 full_packet_list = {}
 
-def addr2str(addr):
-    return '%d.%d.%d.%d' % tuple(int(x) for x in addr)
-
-ETH_P_IP = 0x0800
+ETH_P_IP = 0x8000
+ETH_P_ALL = 0x0003
 
 # Coloque aqui o endereço de destino para onde você quer mandar o ping
-dest_addr = '1.1.1.1'
-
+dest_addr = '192.168.0.16'
 
 def send_ping(send_fd):
-    print('enviando ping')
+    print('enviando ping para:', dest_addr)
     # Exemplo de pacote ping (ICMP echo request) com payload grande
     msg = bytearray(b"\x08\x00\x00\x00" + 5000*b"\xba\xdc\x0f\xfe")
     msg[2:4] = struct.pack('!H', calc_checksum(msg))
     send_fd.sendto(msg, (dest_addr, 0))
 
     asyncio.get_event_loop().call_later(1, send_ping, send_fd)
-
 
 def raw_recv(recv_fd):
     packet = recv_fd.recv(12000)
@@ -307,14 +313,9 @@ def calc_checksum(segment):
     checksum = ~checksum
     return checksum & 0xffff
 
+#---------Etapa 4----------------------
 
-#
-ETH_P_ALL = 0x0003
-# ETH_P_IP  = 0x0800
-
-
-ICMP = 0x01  # https://en.wikipedia.org/wiki/List_of_IP_protocol_numbers
-
+#ICMP = 0x01  # https://en.wikipedia.org/wiki/List_of_IP_protocol_numbers
 
 # Coloque aqui o endereço de destino para onde você quer mandar o ping
 dest_ip = '186.219.82.1'
@@ -332,22 +333,17 @@ dest_mac = '44:31:92:b8:fa:99'
 src_mac = '34:02:86:2e:f9:19'
 
 
-
-
 def ip_addr_to_bytes(addr):
     return bytes(map(int, addr.split('.')))
 
-
 def mac_addr_to_bytes(addr):
     return bytes(int('0x'+s, 16) for s in addr.split(':'))
-
 
 def send_eth(fd, datagram, protocol):
     eth_header = mac_addr_to_bytes(dest_mac) + \
         mac_addr_to_bytes(src_mac) + \
         struct.pack('!H', protocol)
     fd.send(eth_header + datagram)
-
 
 ip_pkt_id = 0
 def send_ip(send_fd, msg, protocol):
@@ -365,16 +361,18 @@ def send_ip(send_fd, msg, protocol):
     ip_header[10:12] = struct.pack('!H', calc_checksum(ip_header))
     ip_pkt_id += 1
     send_eth(fd, ip_header + msg, ETH_P_IP)
+    
 
-#Menu Principal
+#---------------Menu Principal-------------------------
+
 if __name__ == '__main__':
     # Ver http://man7.org/linux/man-pages/man7/raw.7.html
-    send_fd = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.IPPROTO_TCP)
+    fd = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
 
     # Para receber existem duas abordagens. A primeira é a da etapa anterior
     # do trabalho, de colocar socket.IPPROTO_TCP, socket.IPPROTO_UDP ou
     # socket.IPPROTO_ICMP. Assim ele filtra só datagramas IP que contenham um
-    # segmento TCP, UDP ou mensagem ICMP, respectivamente, e permite que esses
+    # segmento TCP, UDP ou mensagem ICMP, respectivamen te, e permite que esses
     # datagramas sejam recebidos. No entanto, essa abordagem faz com que o
     # próprio sistema operacional realize boa parte do trabalho da camada IP,
     # como remontar datagramas fragmentados. Para que essa questão fique a
@@ -384,9 +382,9 @@ if __name__ == '__main__':
     # poderia ser usado para enviar pacotes, mas somente se eles forem quadros,
     # ou seja, se incluírem cabeçalhos da camada de enlace.
     # Ver http://man7.org/linux/man-pages/man7/packet.7.html
-    recv_fd = socket.socket(socket.AF_PACKET, socket.SOCK_DGRAM, socket.htons(ETH_P_ALL))
+    recv_fd = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(ETH_P_ALL))
 
     loop = asyncio.get_event_loop()
-    loop.add_reader(recv_fd, raw_recv, recv_fd)
-    asyncio.get_event_loop().call_later(1, send_ping, send_fd)
+    loop.add_reader(fd, raw_recv_tcp, fd)
+    asyncio.get_event_loop().call_later(1, send_ping, fd)
     loop.run_forever()
